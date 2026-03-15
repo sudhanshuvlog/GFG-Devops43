@@ -8,20 +8,11 @@
                 "ec2:CreateSecurityGroup",
                 "ec2:AuthorizeSecurityGroupIngress",
                 "ec2:RunInstances",
-                "ec2:CreateTags"
-            ],
-            "Resource": [
-                "*"
-            ]
-        },
-        {
-            "Sid": "Statement2",
-            "Effect": "Allow",
-            "Action": [
+                "ec2:CreateTags",
                 "ec2:TerminateInstances"
             ],
             "Resource": [
-                "arn:aws:ec2:ap-south-1:891377007663:instance/i-016cceb48fe0c7ba1"
+                "*"
             ]
         }
     ]
