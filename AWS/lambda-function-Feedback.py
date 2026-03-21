@@ -25,4 +25,4 @@ def lambda_handler(event, context):
         print(f"Error publishing message to SNS: {e}")
     #return "x"
 
-#in api gateway while enabling COROS - in Access-control-allow-header put -> 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
+#in api gateway while enabling COROS - in Access-control-allow-header put -> 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token' 
