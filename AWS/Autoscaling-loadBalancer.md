@@ -70,3 +70,6 @@
 * Web Application Hosting: An e-commerce website experiences high traffic during sales events. An Auto Scaling Group ensures there are enough instances to handle peak traffic. An Application Load Balancer evenly distributes user requests across the instances.
 
 * Microservices Architecture: Each microservice is hosted on separate EC2 instances in an Auto Scaling Group. ALB routes traffic to the appropriate service based on the URL path.
+
+
+![ALB routing rules](ALB-Routing-Rules.png)

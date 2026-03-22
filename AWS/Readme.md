@@ -9,6 +9,7 @@
 * List S3 Buckets - `aws s3 ls`
 * AWS Ec2 Describe Instance - `aws ec2 describe-instances`
 * Create presigned URL for accessing object stored in s3 - `aws s3 presign s3://gfg33/lion.jpeg --expires-in 3000`
+* Cloudwatch alarm- ![cloud-watch-alarm.png](cloud-watch-alarm.png)
 
 ### Important Link - 
 

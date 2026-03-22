@@ -1,0 +1,223 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AI-Ready Observability System
+
+Resources:
+
+  # ---------------------------
+  # DynamoDB Table
+  # ---------------------------
+  AlertDataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ObservabilityAlertData
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: alert_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: alert_id
+          KeyType: HASH
+
+  # ---------------------------
+  # SNS Topic
+  # ---------------------------
+  MySNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: ObservabilityAlerts
+
+  # ---------------------------
+  # SQS Queue
+  # ---------------------------
+  MySQSQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: ObservabilityQueue
+
+  # ---------------------------
+  # SNS ? SQS Subscription
+  # ---------------------------
+  SNSToSQSSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref MySNSTopic
+      Protocol: sqs
+      Endpoint: !GetAtt MySQSQueue.Arn
+      RawMessageDelivery: true
+
+  # ---------------------------
+  # SQS Policy (Secure)
+  # ---------------------------
+  QueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref MySQSQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: sqs:SendMessage
+            Resource: !GetAtt MySQSQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref MySNSTopic
+
+  # ---------------------------
+  # IAM Role for Lambda
+  # ---------------------------
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LambdaSQSExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+
+              # SQS Permissions
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt MySQSQueue.Arn
+
+              # DynamoDB Write
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt AlertDataTable.Arn
+
+              # CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # ---------------------------
+  # Lambda Function
+  # ---------------------------
+  MyLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ObservabilityProcessor
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import uuid
+          from datetime import datetime
+          from decimal import Decimal
+
+          dynamodb = boto3.resource('dynamodb')
+          table = dynamodb.Table('ObservabilityAlertData')
+
+          def lambda_handler(event, context):
+              for record in event['Records']:
+                  try:
+                      body = json.loads(record['body'])
+                      print("? Message:", body)
+
+                      message = body
+
+                      trigger = message.get('Trigger', {})
+                      dimensions = trigger.get('Dimensions', [])
+
+                      instance_id = None
+                      for dim in dimensions:
+                          if dim['name'] == 'InstanceId':
+                              instance_id = dim['value']
+
+                      reason = message.get('NewStateReason', "")
+
+                      # ? Extract actual CPU value
+                      actual_value = 0.0
+                      try:
+                          actual_value = float(reason.split("[")[1].split(" ")[0])
+                      except:
+                          pass
+
+                      # ? Convert to Decimal (MANDATORY for DynamoDB)
+                      actual_value = Decimal(str(actual_value))
+                      threshold = Decimal(str(trigger.get('Threshold', 0)))
+
+                      item = {
+                          "alert_id": str(uuid.uuid4()),
+                          "alarm_name": message.get('AlarmName'),
+                          "metric_name": trigger.get('MetricName'),
+                          "instance_id": instance_id,
+                          "threshold": threshold,
+                          "actual_value": actual_value,
+                          "state": message.get('NewStateValue'),
+                          "region": message.get('Region'),
+                          "timestamp": message.get('StateChangeTime'),
+                          "ingested_at": datetime.utcnow().isoformat()
+                      }
+
+                      table.put_item(Item=item)
+
+                      print("? Stored:", item)
+
+                  except Exception as e:
+                      print("? Error:", str(e))
+
+  # ---------------------------
+  # SQS ? Lambda Mapping
+  # ---------------------------
+  SQSLambdaMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt MySQSQueue.Arn
+      FunctionName: !Ref MyLambdaFunction
+      BatchSize: 10
+      Enabled: true
+
+  # ---------------------------
+  # CloudWatch Alarm
+  # ---------------------------
+  CPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: CPU exceeds 70%
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: InstanceId
+          Value: i-0e024bb81cce2e031
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref MySNSTopic
+
+Outputs:
+  SNSTopic:
+    Value: !Ref MySNSTopic
+
+  SQSQueue:
+    Value: !Ref MySQSQueue
+
+  DynamoDBTable:
+    Value: !Ref AlertDataTable
+
+  LambdaFunction:
+    Value: !Ref MyLambdaFunction
